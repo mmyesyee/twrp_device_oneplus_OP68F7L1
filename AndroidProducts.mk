@@ -1,0 +1,5 @@
+PRODUCT_MAKEFILES := \
+    $(LOCAL_DIR)/twrp_OP68F7L1.mk
+
+COMMON_LUNCH_CHOICES := \
+    twrp_OP68F7L1-eng
