@@ -1,0 +1,181 @@
+name: Build TWRP (twrp-12.1)
+
+# 构建本仓库（device/oneplus/OP68F7L1）对应的 TWRP 镜像。
+#
+# 注意：本设备的 recovery 在 vendor_boot 里（BOARD_INCLUDE_RECOVERY_RAMDISK_IN_VENDOR_BOOT），
+# 所以默认产物是 vendor_boot.img，不是 recovery.img。
+#
+# 免费 runner 只有 4 核 / 16 GB / 14 GB 磁盘，因此：
+#   * 先清掉 runner 上没用的预装工具，腾出 ~50 GB
+#   * repo init 用 --depth=1，只拉一层历史（能省十几 GB）
+#   * 默认 -j4，不要再往上调，否则 16 GB 内存会被 OOM 杀掉
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest_branch:
+        description: 'TWRP manifest 分支'
+        required: true
+        default: 'twrp-12.1'
+      target:
+        description: '构建目标'
+        required: true
+        default: 'vendorbootimage'
+        type: choice
+        options:
+          - vendorbootimage
+          - recoveryimage
+          - bootimage
+      jobs:
+        description: '并行编译数（16 GB 内存建议 4）'
+        required: true
+        default: '4'
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ALLOW_MISSING_DEPENDENCIES: 'true'
+  DEVICE: OP68F7L1
+  DEVICE_PATH: device/oneplus/OP68F7L1
+  LUNCH: twrp_OP68F7L1-eng
+
+jobs:
+  build:
+    name: Build ${{ inputs.target || 'vendorbootimage' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    steps:
+      - name: 释放磁盘空间
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo rm -rf "${AGENT_TOOLSDIRECTORY}" || true
+          sudo docker image prune --all --force || true
+          sudo swapoff -a || true
+          sudo rm -f /mkswapfile /swapfile || true
+          df -h /
+
+      - name: 安装编译依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ccache curl flex g++-multilib gcc-multilib \
+            git gnupg gperf imagemagick lib32z1-dev libelf-dev liblz4-tool \
+            libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush \
+            rsync schedtool squashfs-tools xsltproc zip zlib1g-dev \
+            python3 python-is-python3
+          # 这些在 22.04 上不一定都有，缺了也不影响 recovery 构建
+          sudo apt-get install -y --no-install-recommends \
+            lib32ncurses5-dev lib32readline-dev libncurses5 libncurses5-dev || true
+          ccache -M 2G
+          ccache -z
+
+      - name: 取出设备树
+        uses: actions/checkout@v4
+        with:
+          path: device-tree
+          fetch-depth: 1
+
+      - name: 恢复 ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ runner.os }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ github.ref_name }}-
+            ccache-${{ runner.os }}-
+
+      - name: 同步 TWRP 源码
+        env:
+          MANIFEST_BRANCH: ${{ inputs.manifest_branch || 'twrp-12.1' }}
+        run: |
+          git config --global user.name  "github-actions"
+          git config --global user.email "github-actions@users.noreply.github.com"
+          git config --global color.ui false
+
+          mkdir -p ~/bin
+          curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          export PATH="$HOME/bin:$PATH"
+
+          mkdir -p twrp
+          cd twrp
+          repo init -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git \
+                    -b "$MANIFEST_BRANCH" --depth=1
+          # 网络抖动时重试一次
+          repo sync -j4 --force-sync --no-clone-bundle --no-tags \
+            || repo sync -j4 --force-sync --no-clone-bundle --no-tags
+          df -h /
+
+      - name: 放入设备树
+        run: |
+          cp -a "$GITHUB_WORKSPACE/device-tree" "twrp/${DEVICE_PATH}"
+          # 这些不属于源码树，留着只会拖慢构建
+          rm -rf "twrp/${DEVICE_PATH}/.git" \
+                 "twrp/${DEVICE_PATH}/.github" \
+                 "twrp/${DEVICE_PATH}/recovery/stock-ramdisk-backup"
+          echo "--- 放进去的文件 ---"
+          ls -la "twrp/${DEVICE_PATH}"
+          du -sh "twrp/${DEVICE_PATH}"
+
+      - name: 编译
+        env:
+          TARGET: ${{ inputs.target || 'vendorbootimage' }}
+          JOBS: ${{ inputs.jobs || '4' }}
+        run: |
+          set -e
+          export USE_CCACHE=1
+          export CCACHE_EXEC="$(command -v ccache)"
+          export CCACHE_DIR="$HOME/.ccache"
+          cd twrp
+          source build/envsetup.sh
+          lunch "$LUNCH"
+          # recovery 在这里位于 vendor_boot，先清掉旧产物避免误传
+          rm -f "out/target/product/${DEVICE}/vendor_boot.img"
+          mka "$TARGET" -j"$JOBS"
+          ccache -s
+
+      - name: 收集产物
+        run: |
+          OUT="twrp/out/target/product/${DEVICE}"
+          mkdir -p artifacts
+          for f in vendor_boot.img boot.img recovery.img; do
+            [ -f "$OUT/$f" ] && cp "$OUT/$f" artifacts/
+          done
+          [ -f "$OUT/system/etc/recovery.fstab" ] && cp "$OUT/system/etc/recovery.fstab" artifacts/ || true
+          ls -la artifacts
+          # 产物体积和 vendor_boot 分区上限（64 MiB）对比
+          if [ -f artifacts/vendor_boot.img ]; then
+            SIZE=$(stat -c%s artifacts/vendor_boot.img)
+            echo "vendor_boot.img = ${SIZE} bytes, limit 67108864 -> $([ "$SIZE" -le 67108864 ] && echo OK || echo TOO_BIG)"
+            if [ "$SIZE" -gt 67108864 ]; then
+              echo "::error::vendor_boot.img 超过 64 MiB 分区上限，刷不进去"
+              exit 1
+            fi
+          fi
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.DEVICE }}-${{ inputs.target || 'vendorbootimage' }}-${{ github.sha }}
+          path: artifacts/*.img
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 30
+
+      - name: 发布 Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.img
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
