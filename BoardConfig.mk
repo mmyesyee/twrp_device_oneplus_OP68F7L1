@@ -137,7 +137,13 @@ BOARD_USES_MTK_HARDWARE := true
 TARGET_BOARD_PLATFORM := mt6878
 
 # Treble
-BOARD_VNDK_VERSION := 32
+# build/make/core/board_config.mk:825-828 hard-errors when BOARD_VNDK_VERSION
+# equals PLATFORM_VNDK_VERSION (= PLATFORM_SDK_VERSION = 32 on android-12.1),
+# so a literal 32 is rejected even though it is the right number.  "current"
+# resolves to the platform VNDK and also skips check_vndk_version(), which would
+# look for prebuilts/vndk/v<n>/*/Android.bp that the minimal TWRP manifest does
+# not sync.
+BOARD_VNDK_VERSION := current
 AB_OTA_UPDATER := true
 
 # Vendor_boot recovery ramdisk
