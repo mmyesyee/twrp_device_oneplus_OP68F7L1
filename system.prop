@@ -1,0 +1,11 @@
+# Extra system properties for the recovery ramdisk.
+# Referenced from BoardConfig.mk as TARGET_SYSTEM_PROP.
+
+# FUSE passthrough for emulated storage (needed for /sdcard to be usable)
+persist.sys.fuse.passthrough.enable=true
+
+# Mount point prefix used by update_engine's postinstall step
+ro.postinstall.fstab.prefix=/system
+
+# Default USB function when the userdata partition is readable
+ro.sys.usb.storage.type=mtp
