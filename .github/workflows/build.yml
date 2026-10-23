@@ -76,48 +76,13 @@ jobs:
           # 这些在 22.04 上不一定都有，缺了也不影响 recovery 构建
           sudo apt-get install -y --no-install-recommends \
             lib32ncurses5-dev lib32readline-dev libncurses5 libncurses5-dev || true
-          # ccache 的目录/上限统一在 "准备 ccache 目录" 那一步设置
+          # 注意：这个 workflow 目前不使用 ccache，原因见 "编译" 步骤里的注释
 
       - name: 取出设备树
         uses: actions/checkout@v4
         with:
           path: device-tree
           fetch-depth: 1
-
-      - name: 恢复 ccache
-        uses: actions/cache@v4
-        with:
-          # 不用 ~/.ccache：上次运行里 ccache 往 /home/runner/.ccache/tmp 写的时候
-          # 直接吃到 "Read-only file system"（EROFS），整个构建在 1% 就挂了。
-          # 放到 workspace 下面，是 runner 自己的可写盘，也方便 cache 动作收走。
-          path: ${{ github.workspace }}/.ccache
-          key: ccache-${{ runner.os }}-v2-${{ github.ref_name }}-${{ github.sha }}
-          restore-keys: |
-            ccache-${{ runner.os }}-v2-${{ github.ref_name }}-
-            ccache-${{ runner.os }}-v2-
-
-      - name: 准备 ccache 目录
-        run: |
-          set -e
-          CC_DIR="$GITHUB_WORKSPACE/.ccache"
-          mkdir -p "$CC_DIR" || true
-          if ! touch "$CC_DIR/.write-test" 2>/dev/null; then
-            echo "::warning::$CC_DIR 不可写，退回 $RUNNER_TEMP/ccache"
-            CC_DIR="$RUNNER_TEMP/ccache"
-            mkdir -p "$CC_DIR"
-          fi
-          rm -f "$CC_DIR/.write-test"
-          mkdir -p "$CC_DIR/tmp"
-          {
-            echo "CCACHE_DIR=$CC_DIR"
-            echo "CCACHE_TEMPDIR=$CC_DIR/tmp"
-            echo "CCACHE_MAXSIZE=2G"
-            echo "CCACHE_COMPRESS=1"
-            echo "CCACHE_COMPRESSLEVEL=6"
-            echo "USE_CCACHE=1"
-          } >> "$GITHUB_ENV"
-          echo "ccache dir -> $CC_DIR"
-          ccache -s || true
 
       - name: 同步 TWRP 源码
         env:
@@ -139,7 +104,12 @@ jobs:
           # 网络抖动时重试一次
           repo sync -j4 --force-sync --no-clone-bundle --no-tags \
             || repo sync -j4 --force-sync --no-clone-bundle --no-tags
+          # .repo 里有整套 git 对象，占的空间往往和源码树本身一个量级。
+          # 编译阶段完全不需要它，删掉给 out/ 腾地方。
+          du -sh .repo 2>/dev/null || true
+          rm -rf .repo
           df -h /
+          du -sh .
 
       - name: 放入设备树
         run: |
@@ -167,18 +137,36 @@ jobs:
           JOBS: ${{ inputs.jobs || '4' }}
         run: |
           set -e
-          export CCACHE_EXEC="$(command -v ccache)"
           export LC_ALL=C
           echo "nproc=$(nproc)"; free -h; df -h /
-          echo "CCACHE_DIR=$CCACHE_DIR"
-          ccache -s || true
+          # 不用 ccache：前两次运行都死在同一处 —
+          #   ccache: error: Failed to create temporary file for
+          #   .../.ccache/tmp/tmp.cpp_stdout.XXXXXX: Read-only file system
+          # 换到 workspace 下面也一样，而且每次都精确停在 [1% 475/29326]，
+          # 同一时刻 out/ 的写入却是成功的。所以这次让 clang 直连：
+          # 它只往 out/ 写，而 out/ 已经被证明可写。
           cd twrp
+          avail=$(df --output=avail -k . | tail -1)
+          echo "available: $((avail/1024/1024)) GiB"
+          if [ "$avail" -lt 25000000 ]; then
+            echo "::error::只剩 $((avail/1024/1024)) GiB，不够编译"
+            df -h /; du -sh out 2>/dev/null || true
+            exit 1
+          fi
+          # 后台盯盘：万一又挂，日志里能直接看出是磁盘满还是文件系统只读
+          ( while true; do
+              echo "=== $(date +%H:%M:%S) disk ==="
+              df -h / | tail -1
+              du -sh out 2>/dev/null || true
+              sleep 180
+            done ) &
+          MON=$!
           source build/envsetup.sh
           lunch "$LUNCH"
           # recovery 在这里位于 vendor_boot，先清掉旧产物避免误传
           rm -f "out/target/product/${DEVICE}/vendor_boot.img"
           mka "$TARGET" -j"$JOBS"
-          ccache -s || true
+          kill "$MON" 2>/dev/null || true
 
       - name: 收集产物
         run: |
