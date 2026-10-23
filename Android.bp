@@ -1,0 +1,5 @@
+// This directory is a Soong namespace (the //device/oneplus/OP68F7L1 namespace).
+// device.mk adds it to PRODUCT_SOONG_NAMESPACES, which is what makes the
+// //device/oneplus/OP68F7L1:... module references from this tree resolvable.
+soong_namespace {
+}
