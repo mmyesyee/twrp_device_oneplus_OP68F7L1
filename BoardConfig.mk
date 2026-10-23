@@ -115,7 +115,16 @@ BOARD_SUPER_PARTITION_SIZE := 16911433728
 BOARD_SUPER_PARTITION_GROUPS := mtk_dynamic_partitions
 BOARD_MTK_DYNAMIC_PARTITIONS_SIZE           := 16907239424
 BOARD_MTK_DYNAMIC_PARTITIONS_PARTITION_LIST := system system_ext product vendor vendor_dlkm odm
-BOARD_MTK_DYNAMIC_PARTITIONS_PARTITION_LIST += my_bigball my_carrier my_company my_engineering my_heytap my_manifest my_preload my_product my_region my_stock
+# android-12.1 hardcodes the legal members of a super group in
+# build/make/core/config.mk:904
+#   valid_super_partition_list := system vendor product system_ext odm vendor_dlkm odm_dlkm
+# and errors out on anything else, so the ten oplus my_* logical partitions
+# cannot be listed here (android-14 dropped that check, which is why the
+# Fox-14.1 branch can and does list them).  They are still real partitions on
+# the device -- recovery mounts them from recovery.fstab via the "logical" flag.
+# This list only feeds super.img / OTA metadata, neither of which a
+# vendor_boot-only build generates.
+# BOARD_MTK_DYNAMIC_PARTITIONS_PARTITION_LIST += my_bigball my_carrier my_company my_engineering my_heytap my_manifest my_preload my_product my_region my_stock
 
 # Recovery
 BOARD_HAS_LARGE_FILESYSTEM := true
