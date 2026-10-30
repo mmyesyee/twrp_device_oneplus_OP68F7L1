@@ -42,5 +42,7 @@ my_stock                        /my_stock       erofs   ro                      
 /dev/block/by-name/metadata      /metadata      f2fs    noatime,nosuid,nodev,discard                                                     wait,check,formattable
 /dev/block/by-name/userdata      /data          f2fs    noatime,nosuid,nodev,discard,noflush_merge,fsync_mode=nobarrier,reserve_root=134217,resgid=1065,inlinecrypt wait,check,formattable,quota,resize
 
-/dev/block/by-name/misc          /misc          emmc    defaults                                                                         defaults
-/dev/block/by-name/persist       /persist       ext4    noatime,nosuid,nodev,barrier=1                                                   wait
+# /misc 和 /persist 只在这里定义一次（下面两行带 display/backup 标志），
+# 不要再在 system/etc/twrp.flags 里重复，避免两处定义互相覆盖。
+/dev/block/by-name/misc          /misc          emmc    defaults                                                                         display="misc";backup=1
+/dev/block/by-name/persist       /persist       ext4    noatime,nosuid,nodev,barrier=1                                                   display="persist";wait

@@ -8,12 +8,27 @@
 # This format is always TWRP "v1": <mnt_point> <type> <device> [<device2>] flags=<...>
 # Flags are separated by ';'.
 #
+# 分区名已按真机 /dev/block/by-name 校准（adb 实测，96 个条目）。
+# 注意本机是 A/B：绝大多数分区在 by-name 里叫 <name>_a / <name>_b，
+# 直接写 /dev/block/by-name/<name> 是不存在的。凡是带槽位的分区统一写
+# 不带槽位的路径 + slotselect，由 TWRP 自己补 _a/_b：
+#   TWPartition::Find_Actual_Block_Device()  partition.cpp:3414
+#   if (SlotSelect && Path_Exists(Primary_Block_Device + Get_Active_Slot_Suffix()))
+# 它还会顺手建一个 by-name/<name> -> by-name/<name>_a 的软链给 zip 用。
+# 不带槽位的分区（misc/vb/para/expdb/...）绝不能加 slotselect。
+#
 
 #<mnt_point>        <type>      <device>                                        flags
-/data               f2fs        /dev/block/by-name/userdata                     flags=display="Data";fileencryption=aes-256-xts:aes-256-cts:v2;keydirectory=/metadata/vold/metadata_encryption;metadata_encryption=aes-256-xts:wrappedkey_v0;userdataencryptbackup=1
+
+# ---------------------------------------------------------------------------
+# 用户数据 / 元数据（加密标志都在这里，它们同时出现在 recovery.fstab 里）
+# ---------------------------------------------------------------------------
+/data               f2fs        /dev/block/by-name/userdata                     flags=display="Data";fileencryption=aes-256-xts:aes-256-cts:v2;keydirectory=/metadata/vold/metadata_encryption;metadata_encryption=aes-256-xts:wrappedkey_v0;userdataencryptbackup=1;fscompress
 /metadata           f2fs        /dev/block/by-name/metadata                     flags=display="metadata";backup=1
 
-# Boot images - these are the partitions a user actually needs to flash/back up
+# ---------------------------------------------------------------------------
+# 可刷写的 boot 链（A/B —— slotselect 自动定位当前槽）
+# ---------------------------------------------------------------------------
 /boot               emmc        /dev/block/by-name/boot                         flags=display="boot";slotselect;backup=1;flashimg=1
 /init_boot          emmc        /dev/block/by-name/init_boot                    flags=display="init_boot";slotselect;backup=1;flashimg=1
 /vendor_boot        emmc        /dev/block/by-name/vendor_boot                  flags=display="vendor_boot";slotselect;backup=1;flashimg=1
@@ -21,50 +36,79 @@
 /vbmeta             emmc        /dev/block/by-name/vbmeta                       flags=display="vbmeta";slotselect;backup=1;flashimg=1
 /vbmeta_system      emmc        /dev/block/by-name/vbmeta_system                flags=display="vbmeta_system";slotselect;backup=1;flashimg=1
 /vbmeta_vendor      emmc        /dev/block/by-name/vbmeta_vendor                flags=display="vbmeta_vendor";slotselect;backup=1;flashimg=1
-/logo               emmc        /dev/block/by-name/logo                         flags=display="logo";backup=1
-/misc               emmc        /dev/block/by-name/misc                         flags=display="misc";backup=1
+/logo               emmc        /dev/block/by-name/logo                         flags=display="logo";slotselect
+/pvmfw              emmc        /dev/block/by-name/pvmfw                        flags=display="pvmfw";slotselect
 
-# Persistent / calibration data
-/persist            ext4        /dev/block/by-name/persist                      flags=display="persist"
-/persist_image      emmc        /dev/block/by-name/persist                      flags=display="persist_image";backup=1;flashimg=1
+# ---------------------------------------------------------------------------
+# super —— 动态分区容器（16,515,072 KiB = 16,911,433,728 B）
+# 逻辑分区由 TWRP 依据 recovery.fstab 里的 logical 标志自己建 dm-linear，
+# 这里只把整个 super 暴露出来，方便整包刷 super.img。
+# ---------------------------------------------------------------------------
+/super              emmc        /dev/block/by-name/super                        flags=display="super";flashimg=1
+
+# ---------------------------------------------------------------------------
+# 不带槽位（单份）的分区表 / 引导参数
+# 注意：/misc 与 /persist 在 recovery.fstab 里定义（那边能带挂载选项），此处不重复。
+# ---------------------------------------------------------------------------
+/vb                 emmc        /dev/block/by-name/vb                           flags=display="vb";backup=1;flashimg=1
+/para               emmc        /dev/block/by-name/para                         flags=display="para"
+/boot_para          emmc        /dev/block/by-name/boot_para                    flags=display="boot_para"
+/dram_para          emmc        /dev/block/by-name/dram_para                    flags=display="dram_para"
+/ocdt               emmc        /dev/block/by-name/ocdt                         flags=display="ocdt"
+/proinfo            emmc        /dev/block/by-name/proinfo                      flags=display="proinfo"
+/seccfg             emmc        /dev/block/by-name/seccfg                       flags=display="seccfg"
+/frp                emmc        /dev/block/by-name/frp                          flags=display="frp"
+
+# 持久化 / 校准数据（/persist 在 recovery.fstab 里）
 /protect_f          ext4        /dev/block/by-name/protect1                     flags=display="protect_f"
 /protect_s          ext4        /dev/block/by-name/protect2                     flags=display="protect_s"
 /nvdata             ext4        /dev/block/by-name/nvdata                       flags=display="nvdata"
 /nvcfg              ext4        /dev/block/by-name/nvcfg                        flags=display="nvcfg"
-
-# MTK firmware / bootloader partitions
-/para               emmc        /dev/block/by-name/para                         flags=display="para"
-/boot_para          emmc        /dev/block/by-name/boot_para                    flags=display="boot_para"
-/audio_dsp          emmc        /dev/block/by-name/audio_dsp                    flags=display="audio_dsp"
-/otp                emmc        /dev/block/by-name/otp                          flags=display="otp"
-/odmdtbo            emmc        /dev/block/by-name/odmdtbo                      flags=display="odmdtbo"
-/modem              emmc        /dev/block/by-name/modem                        flags=display="modem"
-/cdt_engineering    emmc        /dev/block/by-name/cdt_engineering              flags=display="cdt_engineering"
-/persistent         emmc        /dev/block/by-name/frp                          flags=display="persistent"
 /nvram              emmc        /dev/block/by-name/nvram                        flags=display="nvram"
-/proinfo            emmc        /dev/block/by-name/proinfo                      flags=display="proinfo"
-/lk                 emmc        /dev/block/by-name/lk                           flags=display="lk"
-/lk2                emmc        /dev/block/by-name/lk2                          flags=display="lk2"
-/gz1                emmc        /dev/block/by-name/gz1                          flags=display="gz1"
-/gz2                emmc        /dev/block/by-name/gz2                          flags=display="gz2"
+/otp                emmc        /dev/block/by-name/otp                          flags=display="otp"
+/sec1               emmc        /dev/block/by-name/sec1                         flags=display="sec1"
+/md_sec             emmc        /dev/block/by-name/md_sec                       flags=display="md_sec"
+
+# 调试 / 崩溃记录（AEE、last_kmsg 都在这些里面）
 /expdb              emmc        /dev/block/by-name/expdb                        flags=display="expdb"
-/seccfg             emmc        /dev/block/by-name/seccfg                       flags=display="seccfg"
-/tee1               emmc        /dev/block/by-name/tee1                         flags=display="tee1"
-/tee2               emmc        /dev/block/by-name/tee2                         flags=display="tee2"
-/mcupm_1            emmc        /dev/block/by-name/mcupm_1                      flags=display="mcupm_1"
-/mcupm_2            emmc        /dev/block/by-name/mcupm_2                      flags=display="mcupm_2"
-/scp1               emmc        /dev/block/by-name/scp1                         flags=display="scp1"
-/scp2               emmc        /dev/block/by-name/scp2                         flags=display="scp2"
-/sspm_1             emmc        /dev/block/by-name/sspm_1                       flags=display="sspm_1"
-/sspm_2             emmc        /dev/block/by-name/sspm_2                       flags=display="sspm_2"
-/dpm_1              emmc        /dev/block/by-name/dpm_1                        flags=display="dpm_1"
-/dpm_2              emmc        /dev/block/by-name/dpm_2                        flags=display="dpm_2"
-/md1img             emmc        /dev/block/by-name/md1img                       flags=display="md1img"
-/md1dsp             emmc        /dev/block/by-name/md1dsp                       flags=display="md1dsp"
-/md1arm7            emmc        /dev/block/by-name/md1arm7                      flags=display="md1arm7"
-/md3img             emmc        /dev/block/by-name/md3img                       flags=display="md3img"
-/spmfw              emmc        /dev/block/by-name/spmfw                        flags=display="spmfw"
-/pi_img             emmc        /dev/block/by-name/pi_img                       flags=display="pi_img"
-/cam_vpu1           emmc        /dev/block/by-name/cam_vpu1                     flags=display="cam_vpu1"
-/cam_vpu2           emmc        /dev/block/by-name/cam_vpu2                     flags=display="cam_vpu2"
-/cam_vpu3           emmc        /dev/block/by-name/cam_vpu3                     flags=display="cam_vpu3"
+/mrdump             emmc        /dev/block/by-name/mrdump                       flags=display="mrdump"
+/pstore             emmc        /dev/block/by-name/pstore                       flags=display="pstore"
+/flashinfo          emmc        /dev/block/by-name/flashinfo                    flags=display="flashinfo"
+
+# ---------------------------------------------------------------------------
+# 带槽位的固件分区（slotselect）
+# ---------------------------------------------------------------------------
+/lk                 emmc        /dev/block/by-name/lk                           flags=display="lk";slotselect
+/modem              emmc        /dev/block/by-name/modem                        flags=display="modem";slotselect
+/cdt_engineering    emmc        /dev/block/by-name/cdt_engineering              flags=display="cdt_engineering";slotselect
+/gz                 emmc        /dev/block/by-name/gz                           flags=display="gz";slotselect
+/tee                emmc        /dev/block/by-name/tee                          flags=display="tee";slotselect
+/mcupm              emmc        /dev/block/by-name/mcupm                        flags=display="mcupm";slotselect
+/scp                emmc        /dev/block/by-name/scp                          flags=display="scp";slotselect
+/sspm               emmc        /dev/block/by-name/sspm                         flags=display="sspm";slotselect
+/dpm                emmc        /dev/block/by-name/dpm                          flags=display="dpm";slotselect
+/apusys             emmc        /dev/block/by-name/apusys                       flags=display="apusys";slotselect
+/ccu                emmc        /dev/block/by-name/ccu                          flags=display="ccu";slotselect
+/vcp                emmc        /dev/block/by-name/vcp                          flags=display="vcp";slotselect
+/gpueb              emmc        /dev/block/by-name/gpueb                        flags=display="gpueb";slotselect
+/spmfw              emmc        /dev/block/by-name/spmfw                        flags=display="spmfw";slotselect
+/pi_img             emmc        /dev/block/by-name/pi_img                       flags=display="pi_img";slotselect
+/mcf_ota            emmc        /dev/block/by-name/mcf_ota                      flags=display="mcf_ota";slotselect
+/connsys_bt         emmc        /dev/block/by-name/connsys_bt                   flags=display="connsys_bt";slotselect
+/connsys_gnss       emmc        /dev/block/by-name/connsys_gnss                 flags=display="connsys_gnss";slotselect
+/connsys_wifi       emmc        /dev/block/by-name/connsys_wifi                 flags=display="connsys_wifi";slotselect
+/oplus_storagefw    emmc        /dev/block/by-name/oplus_storagefw              flags=display="oplus_storagefw";slotselect
+
+# ---------------------------------------------------------------------------
+# OPlus 保留分区
+# ---------------------------------------------------------------------------
+/oplus_custom       emmc        /dev/block/by-name/oplus_custom                 flags=display="oplus_custom"
+/oplusreserve1      emmc        /dev/block/by-name/oplusreserve1                flags=display="oplusreserve1"
+/oplusreserve2      emmc        /dev/block/by-name/oplusreserve2                flags=display="oplusreserve2"
+/oplusreserve3      emmc        /dev/block/by-name/oplusreserve3                flags=display="oplusreserve3"
+/oplusreserve5      emmc        /dev/block/by-name/oplusreserve5                flags=display="oplusreserve5"
+/oplusreserve6      emmc        /dev/block/by-name/oplusreserve6                flags=display="oplusreserve6"
+/splash_odm         emmc        /dev/block/by-name/splash_odm                   flags=display="splash_odm";flashimg=1
+
+# 1 GiB 的 swap 分区（hybridswap），只展示不给备份
+/hybridswap         emmc        /dev/block/by-name/hybridswap                   flags=display="hybridswap"
