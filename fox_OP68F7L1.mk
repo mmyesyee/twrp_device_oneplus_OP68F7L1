@@ -58,6 +58,9 @@ OF_FBE_METADATA_MOUNT_IGNORE := 1
 # /data is f2fs, and metadata encryption is enabled on this device
 OF_FORCE_DATA_FORMAT_F2FS := 1
 OF_WIPE_METADATA_AFTER_DATAFORMAT := 1
+# 真机 /vendor/etc/fstab.mt6878 的 /data 行带 fscompress，说明内核和 f2fs
+# 都开了压缩；打开它 TWRP 才会在格式化/挂载时正确处理该特性。
+OF_ENABLE_FS_COMPRESSION := 1
 
 # Misc
 OF_NO_TREBLE_COMPATIBILITY_CHECK := 1

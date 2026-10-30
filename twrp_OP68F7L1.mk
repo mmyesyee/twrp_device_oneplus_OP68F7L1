@@ -44,13 +44,16 @@ PRODUCT_MANUFACTURER := oppo
 PRODUCT_RELEASE_NAME := PYS110
 PRODUCT_GMS_CLIENTID_BASE := android-oplus
 
-# Fingerprint of the stock ColorOS 17 (Android 17) build. Devices launching with
-# Android 16+ refuse to boot/decrypt under an older fingerprint, so this must
-# match the stock ROM rather than being left at an OrangeFox/AOSP default.
+# Fingerprint of the stock build currently on the device (adb 读取，2026-10 实测)：
+#   ro.build.fingerprint = OnePlus/PYS110/OP68F7L1:16/UKQ1.231108.001/B.2c01668-732243-78c24b:user/release-keys
+#   ro.build.description = sys_mssi_64_cn_armv82-user 16 BP2A.250605.015 1784212740609 release-keys
+#   ro.build.version.security_patch = 2026-07-01
+# 之前这里填的是 ColorOS 17（CP2A.260605.016）的指纹，和真机对不上；
+# 指纹不一致会让 OTA 包断言失败，也会让部分依赖 ro.build.fingerprint 的逻辑走错分支。
 PRODUCT_BUILD_PROP_OVERRIDES += \
-    PRIVATE_BUILD_DESC="OnePlus/PYS110/OP68F7L1:17/CP2A.260605.016/B.4a295d3-241d2b0-242afbd:user/release-keys"
+    PRIVATE_BUILD_DESC="sys_mssi_64_cn_armv82-user 16 BP2A.250605.015 1784212740609 release-keys"
 
-BUILD_FINGERPRINT := OnePlus/PYS110/OP68F7L1:17/CP2A.260605.016/B.4a295d3-241d2b0-242afbd:user/release-keys
+BUILD_FINGERPRINT := OnePlus/PYS110/OP68F7L1:16/UKQ1.231108.001/B.2c01668-732243-78c24b:user/release-keys
 
 # Vendor_boot recovery ramdisk
 PRODUCT_PROPERTY_OVERRIDES += ro.twrp.vendor_boot=true

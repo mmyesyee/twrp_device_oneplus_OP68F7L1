@@ -35,6 +35,10 @@ BOARD_PROPERTY_OVERRIDES_SPLIT_ENABLED := true
 
 # Crypto
 TW_INCLUDE_CRYPTO := true
+# Already implied by TW_INCLUDE_CRYPTO (bootable/recovery/Android.mk sets
+# TW_INCLUDE_CRYPTO_FBE := true and -DTW_INCLUDE_FBE itself), kept explicit so
+# the intent is visible.
+TW_INCLUDE_CRYPTO_FBE := true
 TW_INCLUDE_FBE_METADATA_DECRYPT := true
 BOARD_USES_METADATA_PARTITION := true
 
@@ -46,13 +50,27 @@ BOARD_BOOT_HEADER_VERSION := 4
 BOARD_INIT_BOOT_HEADER_VERSION := 4
 BOARD_INCLUDE_DTB_IN_BOOTIMG := true
 BOARD_KERNEL_SEPARATED_DTBO := true
-BOARD_KERNEL_IMAGE_NAME := Image.gz
+# prebuilt/kernel is an UNCOMPRESSED ARM64 Image (magic 4d 5a 40 fa, "MZ.."),
+# so the .gz suffix was a lie. build/make on android-14 never reads this
+# variable (zero references in core/), it only matters if a kernel gets built
+# from source, so this is cosmetic - but it stops the next person from thinking
+# the kernel is gzipped.
+BOARD_KERNEL_IMAGE_NAME := Image
 BOARD_USES_GENERIC_KERNEL_IMAGE := true
 BOARD_KERNEL_BASE := 0x3FFF8000
 BOARD_PAGE_SIZE := 4096
 BOARD_KERNEL_OFFSET := 0x00008000
 BOARD_RAMDISK_OFFSET := 0x26F08000
 BOARD_TAGS_OFFSET := 0x07C88000
+# DO NOT DELETE THIS, even though it points at a file and the build only uses it
+# as `cat $(BOARD_PREBUILT_DTBIMAGE_DIR)/*.dtb`. core/Makefile gates the
+# INSTALLED_DTBIMAGE_TARGET rule on `ifdef BOARD_PREBUILT_DTBIMAGE_DIR`; without
+# the variable, $(PRODUCT_OUT)/dtb.img has no rule at all and
+# `mka vendorbootimage` dies with "No rule to make target .../dtb.img".
+# The glob resolves to nothing (there is no *.dtb in prebuilt/), so the file it
+# produces is empty - but that is harmless, because
+# BOARD_MKBOOTIMG_ARGS passes --dtb $(TARGET_PREBUILT_DTB) AFTER it and mkbootimg
+# takes the last --dtb, so the real DTB is what ends up in the image.
 BOARD_PREBUILT_DTBIMAGE_DIR := $(DEVICE_PATH)/prebuilt/dtb.img
 BOARD_DTB_SIZE := 327372
 BOARD_DTB_OFFSET := 0x07C88000
@@ -108,6 +126,9 @@ TW_LOAD_VENDOR_MODULES := $(shell echo \"$(sort $(notdir $(BOARD_VENDOR_RAMDISK_
 BOARD_FLASH_BLOCK_SIZE := 262144
 BOARD_BOOTIMAGE_PARTITION_SIZE := 67108864
 BOARD_VENDOR_BOOTIMAGE_PARTITION_SIZE := 67108864
+# 真机实测（/dev/block/by-name/{init_boot,dtbo}_a 各 8192 KiB）
+BOARD_INIT_BOOTIMAGE_PARTITION_SIZE := 8388608
+BOARD_DTBOIMAGE_PARTITION_SIZE := 8388608
 BOARD_SYSTEMIMAGE_FILE_SYSTEM_TYPE := erofs
 BOARD_USERDATAIMAGE_FILE_SYSTEM_TYPE := f2fs
 BOARD_VENDORIMAGE_FILE_SYSTEM_TYPE := erofs
@@ -148,11 +169,26 @@ BOARD_USES_RECOVERY_AS_BOOT := false
 
 # Verified Boot
 BOARD_AVB_ENABLE := true
-BOARD_AVB_MAKE_VBMETA_IMAGE_ARGS += --flags 0
+# avbtool value is a bitmask (libavb/avb_vbmeta_image.h):
+#   AVB_VBMETA_IMAGE_FLAGS_HASHTREE_DISABLED     = 1 << 0 = 1
+#   AVB_VBMETA_IMAGE_FLAGS_VERIFICATION_DISABLED = 1 << 1 = 2
+# So "--flags 3" disables BOTH hashtree and verification; "--flags 2" would
+# still verify the hashtree. 0 means "verify everything".
+# This only affects the vbmeta.img this tree would build - we flash
+# vendor_boot.img only, never vbmeta.
+BOARD_AVB_MAKE_VBMETA_IMAGE_ARGS += --flags 3
 
-# Hack: prevent anti rollback
-PLATFORM_SECURITY_PATCH := 2099-12-31
-VENDOR_SECURITY_PATCH := 2099-12-31
+# Security patch level. Matches the running stock build
+# (ro.build.version.security_patch=2026-07-01 as reported over adb), so the
+# recovery reports the same patch level as the ROM it lives next to.
+# Deliberately NOT the usual 2099-12-31 anti-rollback hack: that value only
+# exists so AVB/OTA refuses to complain about an "older" image, and it is not
+# what makes /data decryptable (decryption depends on the vendor KeyMint
+# service, not on this string). Do not delete the variables outright either -
+# falling back to android-12.1's own default (~2021) would report a patch level
+# four years older than the device.
+PLATFORM_SECURITY_PATCH := 2026-07-01
+VENDOR_SECURITY_PATCH := 2026-07-01
 PLATFORM_VERSION := 99.87.36
 
 # TWRP Configurations
@@ -161,9 +197,31 @@ TW_DEFAULT_LANGUAGE := zh_CN
 TW_EXTRA_LANGUAGES := true
 TW_INCLUDE_FASTBOOTD := true
 TW_DEVICE_VERSION := OP68F7L1
-TW_MAX_BRIGHTNESS := 2047
+
+# 背光：真机 /sys/class/leds/lcd-backlight，max_brightness = 3663
+# （原来的 2047 是照抄别家的，会导致最高亮度只能到 56%、滑条和实际亮度对不上）
+TW_BRIGHTNESS_PATH := "/sys/class/leds/lcd-backlight/brightness"
+TW_MAX_BRIGHTNESS := 3663
+TW_DEFAULT_BRIGHTNESS := 1023
 TW_NO_SCREEN_BLANK := true
+
+# 真机 dumpsys display 报告 60/90/120/144 四档，按 120 Hz 驱动界面
+TW_FRAMERATE := 120
+
+# 电池：真机 /sys/class/power_supply/battery
 TW_CUSTOM_BATTERY_PATH := "/sys/class/power_supply/battery"
+
+# CPU 温度：thermal_zone13 的 type 是 soc_max（真机实测 46494 ≈ 46.5℃）。
+# 不设的话 TWRP 默认读 thermal_zone0，而 zone0 在这台机器上是 battery。
+TW_CUSTOM_CPU_TEMP_PATH := "/sys/class/thermal/thermal_zone13/temp"
+
+# 真机 /proc/bus/input/devices 里有 7 个输入设备：
+#   mtk-kpd / mtk-pmic-keys / oplus_fp_input / touchpanel / touchpanel_kpd
+#   "mt6878-mt6369 Headset Jack" / uinput_nav
+# 只留 touchpanel(event3)。指纹节点(oplus_fp_input)同样注册 ABS_MT，
+# 按名字自动探测触摸屏时会被误选，导致点哪都没反应；uinput_nav 是虚拟节点。
+# \x0a 是 TWRP 规定的多条目分隔符（events.cpp 里按 '\n' 切分）。
+TW_INPUT_BLACKLIST := "oplus_fp_input\x0auinput_nav"
 
 # Debug
 TARGET_USES_LOGD := true
