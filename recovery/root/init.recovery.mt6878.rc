@@ -1,22 +1,19 @@
-import /init.recovery.project.rc
+# MTK/OP68F7L1 bits of the recovery ramdisk (platform mt6878).
+#
+# TWRP's init.rc only imports /init.recovery.${ro.hardware}.rc out of all the
+# hardware-specific rc files, so this file is the single entry point. Do NOT
+# pull in servicemanager.recovery.rc / snapuserd.rc /
+# android.hardware.health-service.example_recovery.rc here: TWRP already
+# installs its own rc for those services and init would log
+# "Ignoring duplicate definition of service".
 
-on init
-    setprop sys.usb.configfs 1
-    setprop sys.usb.controller "11201000.usb0"
+# The stock file also had "import /init.recovery.project.rc". That file does
+# not exist in the stock ColorOS ramdisk either, so the import only produced a
+# "Could not open /init.recovery.project.rc" line in the init log. Dropped.
 
-on fs && property:ro.debuggable=0
-    # distinguish USB shoulde connect or not, i.e. CDP vs SDP
-    # set charging free due to it wait for USB activation
-
-on boot
-    exec u:r:update_engine:s0 root root -- /system/bin/mtk_plpath_utils
-
-# MingQiang.Guo@BSP.DFX.Download, 2022.08.09, add for flash preloader_raw_a in fastboot mode
-    symlink /dev/block/mapper/pl_a /dev/block/by-name/preloader_raw_a
-    symlink /dev/block/mapper/pl_b /dev/block/by-name/preloader_raw_b
-
-on post-fs
-    start boot-hal-1-2
+# mtk.plpath.utils.link and the mmcblk0boot0/1 aliases are defined here and
+# nowhere else, so without this import the file is dead weight in the ramdisk.
+import /mtk-plpath-utils.rc
 
 on init
     setprop sys.usb.configfs 1
@@ -27,6 +24,20 @@ on fs && property:ro.debuggable=0
     # distinguish USB shoulde connect or not, i.e. CDP vs SDP
     # set charging free due to it wait for USB activation
 
+on post-fs
+    start boot-hal-1-2
+
 on boot
+    # TWRP runs every recovery binary in u:r:recovery:s0. The stock value
+    # u:r:update_engine:s0 cannot be entered from /system/bin/mtk_plpath_utils:
+    # that file has no *_exec file_contexts label (it stays system_file), and
+    # the update_engine domain is only reachable through
+    # domain_auto_trans(init, update_engine_exec, update_engine), so the
+    # transition would be denied under the enforcing recovery policy and the
+    # pl_a/pl_b symlinks below would never be created.
+    exec u:r:recovery:s0 root root -- /system/bin/mtk_plpath_utils
     start health-hal-2-1
-    exec u:r:update_engine:s0 root root -- /system/bin/mtk_plpath_utils
+
+    # MingQiang.Guo@BSP.DFX.Download, 2022.08.09, add for flash preloader_raw_a in fastboot mode
+    symlink /dev/block/mapper/pl_a /dev/block/by-name/preloader_raw_a
+    symlink /dev/block/mapper/pl_b /dev/block/by-name/preloader_raw_b

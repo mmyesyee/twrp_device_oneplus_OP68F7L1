@@ -107,15 +107,17 @@ PRODUCT_PACKAGES += \
     android.hardware.gatekeeper@1.0-service
 
 # Additional Libraries
-TARGET_RECOVERY_DEVICE_MODULES += \
-    libkeymaster4 \
-    libkeymaster41 \
-    libpuresoftkeymasterdevice
-
-RECOVERY_LIBRARY_SOURCE_FILES += \
-    $(TARGET_OUT_SHARED_LIBRARIES)/libkeymaster4.so \
-    $(TARGET_OUT_SHARED_LIBRARIES)/libkeymaster41.so \
-    $(TARGET_OUT_SHARED_LIBRARIES)/libpuresoftkeymasterdevice.so
+#
+# The keymaster4 / libpuresoftkeymasterdevice block that used to be here was
+# dropped. Those modules DO exist on android-14 (system/keymaster/Android.bp),
+# so listing them never broke the build - but this device's keystore is KeyMint
+# (ro.hardware.gatekeeper=trustonic, vendor keymint-trustonic service), and
+# TWRP 14.1 already pulls the whole modern stack itself when
+# TW_INCLUDE_CRYPTO_FBE is on: bootable/recovery/prebuilt/Android.mk adds
+# libkeymint_support.so, libkeymint.so, libkm_compat.so,
+# libpuresoftkeymasterdevice.so, android.system.keystore2-V3/V4-ndk.so, ...
+# Keeping keymaster4 around only inflated the image with libraries nothing on
+# this device can talk to.
 
 # Rootdir
 #
